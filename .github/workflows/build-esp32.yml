@@ -1,0 +1,31 @@
+name: Build ESP32 firmware
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'esp32/**'
+      - '.github/workflows/build-esp32.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build WT32-ETH01
+        working-directory: esp32
+        run: pio run
+      - name: Verify merged web-flash image
+        run: test -f esp32/dist/huawei-sunbridge-wt32-eth01-webflash.bin
+      - name: Upload browser-flash firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: huawei-sunbridge-wt32-eth01-webflash
+          path: esp32/dist/huawei-sunbridge-wt32-eth01-webflash.bin
+          if-no-files-found: error
