@@ -10,6 +10,7 @@ This is the embedded alternative to the Debian/Proxmox deployment. It implements
 | Gateway / DNS | `192.168.10.1` |
 | SunBridge listener | TCP `5502` |
 | Web dashboard | HTTP `80` |
+| OTA update page | `http://192.168.10.27/update` |
 | Huawei SDongle | `192.168.10.2:502` |
 | Modbus Unit ID | `1` |
 
@@ -28,6 +29,7 @@ This is the embedded alternative to the Debian/Proxmox deployment. It implements
 - Last 10 disconnected clients.
 - NTP time in `Europe/Rome`; proxy operation does not depend on NTP.
 - `/health` JSON endpoint.
+- Firmware OTA update page over wired Ethernet at `/update`.
 
 ## Build on Windows PowerShell
 
@@ -54,9 +56,27 @@ The merged image contains bootloader, partition table, boot_app0 and application
 5. Remove GPIO0 from ground and reset/power-cycle.
 6. Connect Ethernet. The board should answer at `192.168.10.27`, dashboard port 80, Modbus TCP port 5502.
 
-## Direct PlatformIO upload alternative
+## OTA updates after the first flash
 
-If you prefer to compile and flash from PowerShell in one command, replace `COM5` with the actual serial port:
+After the first serial flash, the USB-to-TTL adapter is no longer required for normal firmware updates.
+
+1. Build the new firmware with PlatformIO.
+2. Open `http://192.168.10.27/update` from a device on the same LAN.
+3. Select the normal application file:
+
+```text
+.pio\build\wt32-eth01\firmware.bin
+```
+
+4. Start the update and wait for the ESP32 to reboot.
+
+For OTA, use `firmware.bin`, **not** the merged `dist\huawei-sunbridge-wt32-eth01-webflash.bin`. The merged image is only for the first/full serial flash at offset `0x0`.
+
+The OTA endpoint is intentionally LAN-only and has no TLS. Do not expose port 80 of the ESP32 to the Internet.
+
+## Direct PlatformIO serial upload alternative
+
+If you prefer to compile and flash the first image from PowerShell, replace `COM5` with the actual serial port:
 
 ```powershell
 cd esp32; py -m platformio run -t upload --upload-port COM5
@@ -66,6 +86,14 @@ For serial diagnostics:
 
 ```powershell
 cd esp32; py -m platformio device monitor -b 115200 -p COM5
+```
+
+## PlatformIO download recovery
+
+If PlatformIO stops with an `HTTPClientError` while downloading `framework-arduinoespressif32`, remove only the partial framework/cache and retry from the `esp32` directory:
+
+```powershell
+Remove-Item "$env:USERPROFILE\.platformio\packages\framework-arduinoespressif32" -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item "$env:USERPROFILE\.platformio\.cache" -Recurse -Force -ErrorAction SilentlyContinue; py -m platformio run
 ```
 
 ## Test / rollback
