@@ -1,0 +1,24 @@
+[Unit]
+Description=Huawei SunBridge Modbus TCP cache proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# CHANGE THIS to the LAN IP address of your Huawei SDongle.
+Environment=SUN2000_HOST=192.168.1.40
+Environment=SUN2000_PORT=502
+Environment=SUN2000_UNIT_ID=1
+Environment=LISTEN_HOST=0.0.0.0
+Environment=LISTEN_PORT=5502
+Environment=POLL_INTERVAL=10
+Environment=CONNECT_WAIT=2.0
+Environment=BATCH_DELAY=0.5
+Environment=LOG_LEVEL=INFO
+ExecStart=/usr/bin/python3 /opt/huawei-sunbridge-modbus/sunbridge_modbus.py
+Restart=always
+RestartSec=10
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target
