@@ -2,103 +2,46 @@
 
 A lightweight LAN-only Modbus TCP cache/proxy for Huawei SUN2000 installations using an SDongle.
 
-> **Goal:** work around the SDongle's very limited Modbus TCP connection capacity without adding Huawei EMMA.
->
-> **Everything stays on your LAN.**
+> **Goal:** work around the SDongle's very limited Modbus TCP connection capacity without adding Huawei EMMA. Everything stays on your LAN.
 
-## Why this exists
+## Two deployment options
 
-Huawei SDongle installations can become unstable when several devices try to use Modbus TCP at the same time.
+SunBridge can now run in either of these forms while keeping the same Home Assistant endpoint and the same SDongle-safe polling behavior:
 
-A typical example is:
+| Deployment | Status | Best for |
+|---|---|---|
+| **Debian 12 LXC / Proxmox** | Reference implementation, validated on the test installation | Maximum observability and easy Linux maintenance |
+| **WT32-ETH01 v1.4 / ESP32 Ethernet** | Embedded implementation for field validation | Dedicated low-power appliance, no VM/container required |
 
-- Huawei Wallbox already communicating through the Huawei installation
-- Home Assistant reading the inverter through Modbus TCP
-- inverter + smart meter + battery data all needed at the same time
+The Debian implementation is `sunbridge_modbus.py` plus the `systemd/` service. The ESP32 implementation is under [`esp32/`](esp32/README.md) and is built with PlatformIO CLI. The ESP32 dashboard shows Ethernet/SDongle status plus each active Modbus client's IP, source port, connection date/time, duration, last request and request count, with a 10-client disconnect history.
 
-SunBridge lets Home Assistant talk to a local cache/proxy instead of continuously consuming another direct Modbus session on the SDongle.
+For the reference ESP32 installation the addresses are intentionally fixed to `192.168.10.27` (SunBridge), gateway/DNS `192.168.10.1`, and `192.168.10.2:502` (SDongle). **Do not run the Proxmox LXC and ESP32 at the same time if both use 192.168.10.27.** This deliberate reuse permits an A/B test without changing Home Assistant.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    HA[Home Assistant\nHuawei Solar integration] -->|Modbus TCP :5502| SB[Huawei SunBridge\nLAN cache/proxy]
-    SB -->|single serialized upstream session\nModbus TCP :502| D[Huawei SDongleA-05]
-    WB[Huawei Wallbox] -->|Huawei native LAN path| D
-    D --> INV[SUN2000 inverter]
-    INV --> BAT[LUNA battery]
-    INV --> METER[Huawei smart meter]
-
-    EMMA[Huawei EMMA]:::optional
-    EMMA -. not required .-> D
-
-    classDef optional stroke-dasharray: 5 5,opacity:0.55;
-```
-
-### In one picture
-
 ```text
-                     ┌───────────────────────┐
-                     │      Home Assistant   │
-                     │  Huawei Solar HACS    │
-                     └───────────┬───────────┘
-                                 │
-                         Modbus TCP :5502
-                                 │
-                     ┌───────────▼───────────┐
-                     │   Huawei SunBridge    │
-                     │    cache / proxy      │
-                     │     LAN only          │
-                     └───────────┬───────────┘
-                                 │
-                  serialized Modbus TCP :502
-                                 │
-                     ┌───────────▼───────────┐
-                     │   Huawei SDongleA-05  │◄──────── Huawei Wallbox
-                     └───────────┬───────────┘
-                                 │
-                     ┌───────────▼───────────┐
-                     │   Huawei SUN2000-L1   │
-                     ├───────────┬───────────┤
-                     │           │           │
-                  Battery     Smart meter   PV
-
-                       Huawei EMMA: NOT REQUIRED
+Home Assistant / Huawei Solar
+            |
+       Modbus TCP :5502
+            |
+      Huawei SunBridge
+       /            \
+Debian LXC       WT32-ETH01
+(Proxmox)        (ESP32/LAN8720)
+       \            /
+        single serialized
+        Modbus TCP :502
+              |
+       Huawei SDongleA-05
+              |
+          SUN2000-L1
+       /      |       \
+   Battery  Meter      PV
 ```
 
-## What problem it solves
+The Huawei Wallbox remains on its normal Huawei path; optional local OCPP to Home Assistant is separate from SunBridge. Huawei EMMA is not required for this tested architecture.
 
-The SDongle exposes Modbus TCP but supports only a very small number of concurrent sessions reliably. In real installations, opening additional connections can lead to timeouts, dropped reads or unstable device discovery.
-
-SunBridge reduces Home Assistant traffic to a controlled, paced upstream polling session and serves cached values locally to clients.
-
-## Important behavior discovered on the tested SDongle
-
-The tested SDongleA-05 was much more reliable with the following timing:
-
-```text
-TCP connect
-    ↓
-wait 2 seconds
-    ↓
-first Modbus request
-    ↓
-response
-    ↓
-wait ~500 ms
-    ↓
-next batch
-    ↓
-...
-    ↓
-close connection
-```
-
-The working implementation also reads complete Modbus TCP frames instead of assuming that a single TCP `read()` contains a complete response.
-
-## Tested hardware and firmware
-
-This is the exact configuration used during development and validation.
+## Tested reference installation
 
 | Component | Tested model / version |
 |---|---|
@@ -114,108 +57,53 @@ This is the exact configuration used during development and validation.
 | Home Assistant integration | **Huawei Solar 2.1.5** |
 | Optional Wallbox integration | **lbbrhzn/ocpp via local OCPP WebSocket** |
 | Downstream SunBridge port | **5502** |
-| Host used for testing | **Debian 12 LXC on Proxmox** |
+| Validated host | **Debian 12 LXC on Proxmox** |
+| Embedded target | **WT32-ETH01 v1.4 / LAN8720** |
 
-### Confirmed working in this setup
+## SDongle-safe behavior
 
-- inverter entities
-- grid/power-meter entities
-- battery entities
-- Huawei Wallbox remaining on the normal Huawei path
-- Huawei SCharger connected separately to Home Assistant via local OCPP
-- FusionSolar remaining operational
-- Home Assistant reading through SunBridge
-- no Huawei EMMA required
-- LAN-only data path for the proxy
+The tested SDongleA-05 is substantially more reliable when SunBridge opens one controlled upstream connection, waits **2 seconds** before the first request, reads complete Modbus TCP frames, waits about **500 ms** between register batches, and serializes all upstream traffic. Both implementations preserve this behavior.
 
-For the tested Huawei SCharger OCPP setup, including the local WebSocket configuration and currently validated entities/status, see [Home Assistant + Huawei Solar](docs/HOME-ASSISTANT.md#optional-huawei-scharger-in-home-assistant-via-ocpp).
+## Register batches
 
-## Register batches used in the tested configuration
-
-```python
-REGISTER_BATCHES = [
-    (30000, 15),
-    (30015, 50),
-    (30071, 1),
-    (30075, 2),
-    (32000, 20),
-    (32064, 52),
-    (37100, 38),
-    (37200, 2),
-    (37760, 28),
-    (40126, 2),
-    (42900, 10),
-    (43006, 2),
-    (47000, 1),
-    (47089, 1),
-]
+```text
+30000/15  30015/50  30071/1  30075/2
+32000/20  32064/52  37100/38 37200/2
+37760/28  40126/2   42900/10 43006/2
+47000/1   47089/1
 ```
 
-These ranges were required to make the tested Home Assistant Huawei Solar setup discover inverter, meter and battery data correctly.
+These ranges were required for the tested Huawei Solar setup to discover inverter, grid/power-meter and battery data correctly. Setup reads in the `30000–30071` area that are not already cached can be passed through upstream; FC6 writes are write-through.
 
-## Network example
-
-Use your own addresses. The values below are examples only.
-
-```mermaid
-flowchart TB
-    LAN[Home LAN]
-    HA[Home Assistant\n192.168.1.20]
-    SB[SunBridge\n192.168.1.30:5502]
-    D[SDongleA-05\n192.168.1.40:502]
-    WB[Huawei Wallbox]
-
-    LAN --- HA
-    LAN --- SB
-    LAN --- D
-    LAN --- WB
-    HA -->|TCP 5502| SB
-    SB -->|TCP 502| D
-    WB -->|Huawei native communication| D
-```
-
-The Wallbox is **not** redirected to SunBridge. It continues using the normal Huawei architecture. Home Assistant is the client redirected to the proxy.
-
-## Installation target
-
-Recommended minimal host:
-
-- Debian 12
-- Python 3
-- systemd
-- Ethernet/LAN connection preferred
-
-A small Proxmox LXC is more than enough. The reference installation used 1 vCPU and 512 MB RAM.
-
-## Quick install
-
-Clone the repository:
+## Option A — Debian 12 / Proxmox LXC
 
 ```bash
 git clone https://github.com/samumar82/huawei-sunbridge-modbus.git
 cd huawei-sunbridge-modbus
-```
-
-Install the script:
-
-```bash
 sudo mkdir -p /opt/huawei-sunbridge-modbus
 sudo cp sunbridge_modbus.py /opt/huawei-sunbridge-modbus/
-```
-
-Install the service:
-
-```bash
 sudo cp systemd/huawei-sunbridge-modbus.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now huawei-sunbridge-modbus
 ```
 
-Then edit the service environment values for your SDongle address if needed.
+Configure the service environment for the actual SDongle address. The reference LXC used Debian 12, 1 vCPU and 512 MB RAM.
 
-## Home Assistant configuration
+## Option B — WT32-ETH01 v1.4
 
-In the Huawei Solar integration, point Home Assistant to the SunBridge host instead of directly to the SDongle:
+See **[`esp32/README.md`](esp32/README.md)** for the fixed reference network settings, PlatformIO CLI one-command build, browser-flash merged image, wiring/boot-mode notes and rollback procedure.
+
+Preferred Windows PowerShell build from the repository root:
+
+```powershell
+py -m pip install -U platformio; cd esp32; py -m platformio run
+```
+
+The build creates `esp32/dist/huawei-sunbridge-wt32-eth01-webflash.bin`, a merged image intended for flashing from address `0x0` with an ESP Web Tools-compatible browser flasher.
+
+## Home Assistant
+
+Point Huawei Solar to the SunBridge host rather than directly to the SDongle:
 
 ```text
 Host: <SunBridge LAN IP>
@@ -223,63 +111,21 @@ Port: 5502
 Slave / Unit ID: 1
 ```
 
-The SDongle itself remains on TCP port 502.
-
-## Why the delays matter
-
-During testing, opening a connection and immediately sending a request frequently caused timeouts. Adding a delay after TCP connection establishment significantly improved stability.
-
-Likewise, rapid back-to-back register reads were unreliable. Increasing the inter-batch pause from about 50 ms to about 500 ms resulted in repeated complete polling cycles in the tested installation.
-
-This is intentionally conservative. Huawei firmware behavior may differ between devices and versions.
+In the reference A/B test both LXC and ESP32 use `192.168.10.27:5502`, but only one may be powered/running at a time.
 
 ## Safety and limitations
 
-- This project implements Modbus TCP behavior for a trusted local network.
-- There is no authentication layer in Modbus TCP itself.
-- Do not expose the proxy or SDongle Modbus port to the public Internet.
-- Do not expose a non-TLS local OCPP listener to the public Internet.
-- Write requests can change inverter settings. Use write support carefully.
-- Firmware updates may change timing or register behavior.
-- Hardware not listed above has not been validated by this project.
+- Keep the proxy and SDongle Modbus ports on a trusted LAN; Modbus TCP has no authentication layer.
+- Do not expose the proxy, SDongle, or non-TLS local OCPP listener to the public Internet.
+- FC6 write requests can change inverter settings; use write support carefully.
+- The Debian implementation is the currently validated reference. Treat the ESP32 implementation as a field-test target until it has been validated on the same installation for an extended period.
+- Firmware updates can change Huawei timing/register behavior.
 - This project is not affiliated with or endorsed by Huawei.
 
-## Credits and upstream projects
+## Credits
 
-This project is derived from and inspired by existing open-source work.
-
-### cloudapp-dev/sun2000-modbus-cache
-
-https://github.com/cloudapp-dev/sun2000-modbus-cache
-
-The original MIT-licensed project provided the basic Modbus TCP caching/write-through proxy architecture. Huawei SunBridge Modbus keeps the original copyright notice and MIT license terms and adds SDongleA-05-specific stability changes, additional register ranges, Home Assistant discovery-oriented behavior and documentation based on real-world testing.
-
-### olivergregorius/sun2000_modbus
-
-https://github.com/olivergregorius/sun2000_modbus
-
-Used as a technical reference. Its documentation independently notes that waiting after connection before the first register read can improve stability.
-
-### wlcrs/huawei_solar
-
-https://github.com/wlcrs/huawei_solar
-
-Home Assistant integration used for compatibility testing. No Huawei Solar source code is included in this project.
-
-### lbbrhzn/ocpp
-
-https://github.com/lbbrhzn/ocpp
-
-Home Assistant OCPP integration used to connect the tested Huawei SCharger locally over WebSocket. It is separate from SunBridge and is not bundled with this project.
+Derived from/inspired by `cloudapp-dev/sun2000-modbus-cache` (MIT), with technical references from `olivergregorius/sun2000_modbus`, compatibility testing against `wlcrs/huawei_solar`, and optional Wallbox integration using `lbbrhzn/ocpp`. The original MIT copyright notice is retained in the project license.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
-
-The original MIT copyright notice from `cloudapp-dev/sun2000-modbus-cache` is retained because this project is based on that software.
-
-## Project status
-
-Initial public release: working on the tested Huawei SDongleA-05 / SUN2000-L1 installation described above.
-
-If you test another inverter, SDongle firmware, battery, meter or Wallbox combination, please open an issue with the model and firmware versions.
+MIT. See `LICENSE`.
