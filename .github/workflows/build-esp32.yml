@@ -1,11 +1,6 @@
 name: Build ESP32 firmware
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'esp32/**'
-      - '.github/workflows/build-esp32.yml'
   workflow_dispatch:
 
 jobs:
