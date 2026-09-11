@@ -109,8 +109,10 @@ This is the exact configuration used during development and validation.
 | SDongle firmware | **V200R025C00SPC130** |
 | SDongle protocol | **P1.15-D50.0** |
 | SDongle monitoring hardware revision | **B** |
+| Huawei Wallbox | **Huawei SCharger 7.4 kW single-phase** |
 | Upstream Modbus TCP | **port 502** |
 | Home Assistant integration | **Huawei Solar 2.1.5** |
+| Optional Wallbox integration | **lbbrhzn/ocpp via local OCPP WebSocket** |
 | Downstream SunBridge port | **5502** |
 | Host used for testing | **Debian 12 LXC on Proxmox** |
 
@@ -120,10 +122,13 @@ This is the exact configuration used during development and validation.
 - grid/power-meter entities
 - battery entities
 - Huawei Wallbox remaining on the normal Huawei path
+- Huawei SCharger connected separately to Home Assistant via local OCPP
 - FusionSolar remaining operational
 - Home Assistant reading through SunBridge
 - no Huawei EMMA required
 - LAN-only data path for the proxy
+
+For the tested Huawei SCharger OCPP setup, including the local WebSocket configuration and currently validated entities/status, see [Home Assistant + Huawei Solar](docs/HOME-ASSISTANT.md#optional-huawei-scharger-in-home-assistant-via-ocpp).
 
 ## Register batches used in the tested configuration
 
@@ -233,6 +238,7 @@ This is intentionally conservative. Huawei firmware behavior may differ between 
 - This project implements Modbus TCP behavior for a trusted local network.
 - There is no authentication layer in Modbus TCP itself.
 - Do not expose the proxy or SDongle Modbus port to the public Internet.
+- Do not expose a non-TLS local OCPP listener to the public Internet.
 - Write requests can change inverter settings. Use write support carefully.
 - Firmware updates may change timing or register behavior.
 - Hardware not listed above has not been validated by this project.
@@ -259,6 +265,12 @@ Used as a technical reference. Its documentation independently notes that waitin
 https://github.com/wlcrs/huawei_solar
 
 Home Assistant integration used for compatibility testing. No Huawei Solar source code is included in this project.
+
+### lbbrhzn/ocpp
+
+https://github.com/lbbrhzn/ocpp
+
+Home Assistant OCPP integration used to connect the tested Huawei SCharger locally over WebSocket. It is separate from SunBridge and is not bundled with this project.
 
 ## License
 
