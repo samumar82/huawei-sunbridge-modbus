@@ -1,0 +1,11 @@
+include/secrets.h
+include/secrets.h.local-backup
+.pio/
+dist/
+src/main.cpp.AUTO*
+src/main.cpp.*BASELINE
+src/main.cpp.FAILED-*
+src/main.cpp.PRE-*
+src/main.cpp.before-*
+src/main.cpp.failed-*
+src/main.cpp.BEFORE-*
