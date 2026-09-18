@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <ETH.h>
 #include <WiFi.h>
+#include <Preferences.h>
+#include "secrets.h"
 #include <WiFiClient.h>
 #include <WiFiServer.h>
 #include <WebServer.h>
@@ -12,15 +14,11 @@
 #define SUNBRIDGE_VERSION "dev"
 #endif
 
-static const IPAddress LOCAL_IP(192, 168, 10, 27);
-static const IPAddress GATEWAY(192, 168, 10, 1);
-static const IPAddress SUBNET(255, 255, 255, 0);
-static const IPAddress DNS1(192, 168, 10, 1);
-static const IPAddress SDONGLE_IP(192, 168, 10, 2);
-
-static constexpr uint16_t SDONGLE_PORT = 502;
-static constexpr uint16_t SUNBRIDGE_PORT = 5502;
-static constexpr uint8_t DEVICE_ID = 1;
+static const IPAddress LOCAL_IP(LOCAL_IP_1, LOCAL_IP_2, LOCAL_IP_3, LOCAL_IP_4);
+static const IPAddress GATEWAY(GATEWAY_1, GATEWAY_2, GATEWAY_3, GATEWAY_4);
+static const IPAddress SUBNET(SUBNET_1, SUBNET_2, SUBNET_3, SUBNET_4);
+static const IPAddress DNS1(DNS_1, DNS_2, DNS_3, DNS_4);
+static const IPAddress SDONGLE_IP(SDONGLE_IP_1, SDONGLE_IP_2, SDONGLE_IP_3, SDONGLE_IP_4);
 
 // WT32-ETH01 v1.4 / LAN8720 wiring.
 // Names intentionally avoid Arduino-ESP32 ETH_* macros.
@@ -31,10 +29,11 @@ static constexpr int SB_ETH_MDIO_PIN = 18;
 static constexpr eth_phy_type_t SB_ETH_PHY_TYPE = ETH_PHY_LAN8720;
 static constexpr eth_clock_mode_t SB_ETH_CLK_MODE = ETH_CLOCK_GPIO0_IN;
 
-static constexpr uint32_t POLL_INTERVAL_MS = 10000;
+static constexpr uint32_t POLL_INTERVAL_MS = 3000;
 static constexpr uint32_t CONNECT_WAIT_MS = 2000;
 static constexpr uint32_t BATCH_DELAY_MS = 500;
 static constexpr uint32_t UPSTREAM_TIMEOUT_MS = 5000;
+static constexpr uint32_t WIFI_FALLBACK_DELAY_MS = 8000;
 static constexpr size_t MAX_CLIENTS = 4;
 static constexpr size_t MAX_HISTORY = 10;
 
@@ -422,7 +421,7 @@ static void serviceClients() {
 
 static void pollTask(void *) {
   for (;;) {
-    if (!ethConnected) {
+    if (!ethConnected && WiFi.status() != WL_CONNECTED) {
       vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
@@ -473,15 +472,22 @@ static String htmlPage() {
   h = F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='5'><title>Huawei SunBridge ESP32</title><style>body{font-family:system-ui;background:#111827;color:#e5e7eb;margin:0;padding:20px}.wrap{max-width:1100px;margin:auto}.card{background:#1f2937;border-radius:12px;padding:18px;margin:14px 0}table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid #374151;text-align:left}.ok{color:#34d399}.bad{color:#f87171}.muted{color:#9ca3af}code,a{color:#93c5fd}</style></head><body><div class='wrap'>");
 
   h += "<h1>Huawei SunBridge ESP32</h1><div class='muted'>Firmware " + String(SUNBRIDGE_VERSION) + " · WT32-ETH01 v1.4</div>";
-  h += "<div class='card'><h2>Ethernet</h2><table>";
-  h += "<tr><td>Status</td><td class='" + String(ethConnected ? "ok'>UP" : "bad'>DOWN") + "</td></tr>";
-  h += "<tr><td>IP</td><td><code>" + ETH.localIP().toString() + "</code></td></tr>";
-  h += "<tr><td>Gateway</td><td>" + ETH.gatewayIP().toString() + "</td></tr>";
-  h += "<tr><td>Link</td><td>" + String(ETH.linkSpeed()) + " Mbps " + String(ETH.fullDuplex() ? "Full Duplex" : "Half Duplex") + "</td></tr></table></div>";
+  bool wifiUp = (WiFi.status() == WL_CONNECTED);
+  String activeInterface = ethConnected ? "Ethernet" : (wifiUp ? "Wi-Fi fallback" : "None");
+  IPAddress activeIP = ethConnected ? ETH.localIP() : (wifiUp ? WiFi.localIP() : IPAddress(0, 0, 0, 0));
+
+  h += "<div class='card'><h2>Network</h2><table>";
+  h += "<tr><td>Active interface</td><td class='" + String((ethConnected || wifiUp) ? "ok'>UP - " : "bad'>DOWN - ") + activeInterface + "</td></tr>";
+  h += "<tr><td>IP</td><td><code>" + activeIP.toString() + "</code></td></tr>";
+  h += "<tr><td>Gateway</td><td>" + GATEWAY.toString() + "</td></tr>";
+  h += "<tr><td>Ethernet</td><td>" + String(ethConnected ? "UP" : "DOWN") + "</td></tr>";
+  h += "<tr><td>Wi-Fi</td><td>" + String(wifiUp ? "UP" : "DOWN") + "</td></tr>";
+  if (ethConnected) h += "<tr><td>Ethernet link</td><td>" + String(ETH.linkSpeed()) + " Mbps " + String(ETH.fullDuplex() ? "Full Duplex" : "Half Duplex") + "</td></tr>";
+  h += "</table></div>";
 
   h += "<div class='card'><h2>SDongle / proxy</h2><table>";
-  h += "<tr><td>SDongle</td><td><code>" + SDONGLE_IP.toString() + ":502</code></td></tr>";
-  h += "<tr><td>SunBridge</td><td><code>" + LOCAL_IP.toString() + ":5502</code></td></tr>";
+  h += "<tr><td>SDongle</td><td><code>" + SDONGLE_IP.toString() + ":" + String(SDONGLE_PORT) + "</code></td></tr>";
+  h += "<tr><td>SunBridge</td><td><code>" + LOCAL_IP.toString() + ":" + String(SUNBRIDGE_PORT) + "</code></td></tr>";
   h += "<tr><td>Cache valida</td><td>" + String(cacheValid ? "sì" : "no") + "</td></tr>";
   h += "<tr><td>Ultimo poll</td><td>" + String(pollOkBatches) + "/" + String(BATCH_COUNT) + " batch OK</td></tr>";
   h += "<tr><td>Età cache</td><td>" + (lastSuccessfulPollMillis ? String((millis() - lastSuccessfulPollMillis) / 1000) + " s" : String("mai aggiornata")) + "</td></tr>";
@@ -516,7 +522,10 @@ static void setupWeb() {
   });
 
   webServer.on("/health", HTTP_GET, []() {
+    bool wifiUp = (WiFi.status() == WL_CONNECTED);
     String json = String("{\"ethernet\":") + (ethConnected ? "true" : "false") +
+                  ",\"wifi\":" + (wifiUp ? String("true") : String("false")) +
+                  ",\"active_interface\":\"" + (ethConnected ? String("ethernet") : (wifiUp ? String("wifi") : String("none"))) + "\"" +
                   ",\"cache_valid\":" + (cacheValid ? String("true") : String("false")) +
                   ",\"poll_ok\":" + String(pollOkBatches) +
                   ",\"poll_total\":" + String(BATCH_COUNT) +
@@ -556,27 +565,56 @@ void setup() {
 
   WiFi.onEvent(WiFiEvent);
 
-  // Arduino-ESP32 2.0.17 signature:
-  // begin(phy_addr, power, mdc, mdio, type, clk_mode, use_mac_from_efuse)
-  bool ethStarted = ETH.begin(
-    SB_ETH_PHY_ADDR,
-    SB_ETH_PHY_POWER,
-    SB_ETH_MDC_PIN,
-    SB_ETH_MDIO_PIN,
-    SB_ETH_PHY_TYPE,
-    SB_ETH_CLK_MODE
-  );
+  Preferences prefs;
+  prefs.begin("sunbridge", false);
+  bool wifiFallbackBoot = prefs.getBool("wifiFallback", false);
 
-  if (!ethStarted) {
-    Serial.println("ETH.begin failed");
+  if (wifiFallbackBoot) {
+    Serial.println("WiFi fallback boot - Ethernet not initialized");
+    WiFi.mode(WIFI_STA);
+    WiFi.config(LOCAL_IP, GATEWAY, SUBNET, DNS1);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    uint32_t wifiStarted = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - wifiStarted < 15000) {
+      delay(100);
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.printf("WiFi fallback UP: %s\n", WiFi.localIP().toString().c_str());
+      prefs.putBool("wifiFallback", false);
+    } else {
+      Serial.println("WiFi fallback connection failed");
+    }
+  } else {
+    Serial.println("Ethernet priority boot");
+    bool ethStarted = ETH.begin(
+      SB_ETH_PHY_ADDR,
+      SB_ETH_PHY_POWER,
+      SB_ETH_MDC_PIN,
+      SB_ETH_MDIO_PIN,
+      SB_ETH_PHY_TYPE,
+      SB_ETH_CLK_MODE
+    );
+
+    if (!ethStarted) Serial.println("ETH.begin failed");
+    ETH.config(LOCAL_IP, GATEWAY, SUBNET, DNS1);
+
+    uint32_t started = millis();
+    while (!ethConnected && millis() - started < WIFI_FALLBACK_DELAY_MS) {
+      delay(100);
+    }
+
+    if (!ethConnected) {
+      Serial.println("Ethernet unavailable - next boot will use WiFi");
+      prefs.putBool("wifiFallback", true);
+      prefs.end();
+      delay(250);
+      ESP.restart();
+    }
   }
 
-  ETH.config(LOCAL_IP, GATEWAY, SUBNET, DNS1);
-
-  uint32_t started = millis();
-  while (!ethConnected && millis() - started < 15000) {
-    delay(100);
-  }
+  prefs.end();
 
   configTzTime(
     "CET-1CEST,M3.5.0,M10.5.0/3",
