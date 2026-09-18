@@ -47,6 +47,76 @@ dist\huawei-sunbridge-wt32-eth01-webflash.bin
 
 The merged image contains bootloader, partition table, boot_app0 and application at their correct offsets, so it can be flashed as one image starting at address `0x0` by a compatible ESP Web Tools flasher such as web.esphome.io.
 
+## Bill of materials and first flash wiring
+
+For the tested WT32-ETH01 setup:
+
+| Item | Purpose |
+|---|---|
+| **WT32-ETH01 v1.4** | ESP32 + LAN8720 Ethernet board running SunBridge |
+| **USB-to-TTL adapter with CH340G** | First serial flash and serial diagnostics |
+| **Ethernet cable** | Wired LAN connection |
+| **Female-female Dupont wires** | Power, UART and GPIO0 connections |
+| **5 V USB power source/cable** | Power for the WT32-ETH01 when not powered by the TTL adapter |
+
+The CH340G adapter used during validation was measured at approximately 3.3 V on TXD/RXD logic and 5 V on its 5 V supply pin.
+
+### CH340G -> WT32-ETH01 wiring
+
+Use the **UART0 RX0/TX0 pins near the antenna** on the WT32-ETH01 v1.4:
+
+```text
+CH340G GND  -> WT32 GND
+CH340G TXD  -> WT32 RX0 / RXD0 (GPIO3)
+CH340G RXD  -> WT32 TX0 / TXD0 (GPIO1)
+CH340G 5V   -> WT32 5V
+WT32 IO0    -> GND only while entering flash/download mode
+```
+
+**Do not connect the CH340G 3.3 V power pin to the WT32-ETH01.** The board is powered from 5 V; UART TX/RX must use 3.3 V logic. Do not move power/signal wires while the board is powered.
+
+For normal boot after flashing, disconnect **IO0 from GND** and reset/power-cycle the board.
+
+## First flash from Windows PowerShell
+
+The exact method validated on the reference board uses PlatformIO for the build and its bundled esptool for flashing.
+
+Build from the `esp32` directory:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run
+```
+
+Put the board in download mode with **IO0 -> GND**, power/reset it, and optionally verify communication:
+
+```powershell
+py "$env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py" --chip esp32 --port COM17 chip_id
+```
+
+Then flash the merged image at offset `0x0`:
+
+```powershell
+py "$env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py" --chip esp32 --port COM17 --baud 460800 write_flash 0x0 ".\dist\huawei-sunbridge-wt32-eth01-webflash.bin"
+```
+
+Replace `COM17` with the port assigned to your USB-to-TTL adapter. When flashing completes, disconnect **IO0 from GND** and reset/power-cycle.
+
+Serial monitor:
+
+```powershell
+py -m serial.tools.miniterm COM17 115200
+```
+
+Exit miniterm with `Ctrl+]`.
+
+A healthy poll reports:
+
+```text
+Poll: 14/14 batches OK
+```
+
+**Critical:** if the Proxmox/LXC version also uses `192.168.10.27`, it must be stopped before connecting the ESP32 to the LAN. Running both at once creates a duplicate-IP conflict and invalidates network/Modbus tests.
+
 ## Flash from web.esphome.io
 
 1. Stop LXC 126 first, because it owns `192.168.10.27` in the reference setup.
