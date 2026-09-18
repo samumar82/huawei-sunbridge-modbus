@@ -175,7 +175,7 @@ static bool readExact(WiFiClient &client, uint8_t *buffer, size_t length, uint32
   size_t got = 0;
   uint32_t started = millis();
 
-  while (got < length && client.connected()) {
+  while (got < length) {
     while (client.available() && got < length) {
       int r = client.read(buffer + got, length - got);
       if (r > 0) got += (size_t)r;
@@ -184,7 +184,7 @@ static bool readExact(WiFiClient &client, uint8_t *buffer, size_t length, uint32
     if (millis() - started > timeoutMs) return false;
     vTaskDelay(pdMS_TO_TICKS(2));
   }
-  return got == length;
+  return true;
 }
 
 static bool readResponse(WiFiClient &client, uint16_t &tx, uint8_t &uid, std::vector<uint8_t> &pdu) {
@@ -439,10 +439,12 @@ static void pollTask(void *) {
       for (const auto &batch : REGISTER_BATCHES) {
         std::vector<uint16_t> values;
         if (readOnConnection(client, DEVICE_ID, batch.start, batch.count, values)) {
+          Serial.printf("Batch OK: %u/%u\\n", batch.start, batch.count);
           cacheSetRange(batch.start, values);
           okBatches++;
         } else {
           upstreamErrors++;
+          Serial.printf("Batch FAIL: %u/%u\\n", batch.start, batch.count);
         }
         vTaskDelay(pdMS_TO_TICKS(BATCH_DELAY_MS));
       }
