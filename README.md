@@ -91,7 +91,7 @@ Configure the service environment for the actual SDongle address. The reference 
 
 ## Option B — WT32-ETH01 v1.4
 
-See **[`esp32/README.md`](esp32/README.md)** for the fixed reference network settings, PlatformIO CLI one-command build, browser-flash merged image, wiring/boot-mode notes and rollback procedure.
+See **[`esp32/README.md`](esp32/README.md)** for the fixed reference network settings, complete BOM, CH340G USB-to-TTL wiring, IO0 download-mode procedure, validated PowerShell/esptool flashing commands, PlatformIO build, browser-flash merged image, OTA updates and rollback procedure.
 
 Preferred Windows PowerShell build from the repository root:
 
@@ -118,7 +118,7 @@ In the reference A/B test both LXC and ESP32 use `192.168.10.27:5502`, but only 
 - Keep the proxy and SDongle Modbus ports on a trusted LAN; Modbus TCP has no authentication layer.
 - Do not expose the proxy, SDongle, or non-TLS local OCPP listener to the public Internet.
 - FC6 write requests can change inverter settings; use write support carefully.
-- The Debian implementation is the currently validated reference. Treat the ESP32 implementation as a field-test target until it has been validated on the same installation for an extended period.
+- The Debian implementation is the long-running reference. The WT32-ETH01 implementation is being field-validated on the same installation; short tests have completed full `14/14` register-batch polls when it is the only device using the SunBridge IP.
 - Firmware updates can change Huawei timing/register behavior.
 - This project is not affiliated with or endorsed by Huawei.
 
