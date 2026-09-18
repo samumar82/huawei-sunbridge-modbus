@@ -11,11 +11,13 @@ SunBridge can now run in either of these forms while keeping the same Home Assis
 | Deployment | Status | Best for |
 |---|---|---|
 | **Debian 12 LXC / Proxmox** | Reference implementation, validated on the test installation | Maximum observability and easy Linux maintenance |
-| **WT32-ETH01 v1.4 / ESP32 Ethernet** | Embedded implementation for field validation | Dedicated low-power appliance, no VM/container required |
+| **WT32-ETH01 v1.4 / ESP32** | Validated embedded implementation with Ethernet-first + Wi-Fi fallback | Dedicated low-power appliance, no VM/container required |
 
-The Debian implementation is `sunbridge_modbus.py` plus the `systemd/` service. The ESP32 implementation is under [`esp32/`](esp32/README.md) and is built with PlatformIO CLI. The ESP32 dashboard shows Ethernet/SDongle status plus each active Modbus client's IP, source port, connection date/time, duration, last request and request count, with a 10-client disconnect history.
+The Debian implementation is `sunbridge_modbus.py` plus the `systemd/` service. The ESP32 implementation is under **[`esp32/`](esp32/README.md)** and is built with PlatformIO CLI. **The ESP32 folder contains the complete walkthrough**: user configuration, network settings, Wi-Fi fallback, BOM, wiring, first flash, PlatformIO build, serial diagnostics, OTA updates, validation and rollback. Start there if you want to build the hardware version.
 
-For the reference ESP32 installation the addresses are intentionally fixed to `192.168.10.27` (SunBridge), gateway/DNS `192.168.10.1`, and `192.168.10.2:502` (SDongle). **Do not run the Proxmox LXC and ESP32 at the same time if both use 192.168.10.27.** This deliberate reuse permits an A/B test without changing Home Assistant.
+The ESP32 dashboard reports the active network interface, SDongle/proxy state, polling/cache state and Modbus clients. Installation-specific IP addresses, gateway, DNS, SDongle endpoint, ports, Unit ID and Wi-Fi credentials are configured locally in `esp32/include/secrets.h` using the safe public `secrets.example.h` template. They are **not fixed to the reference installation** and the real secrets file is ignored by Git.
+
+**Do not run two SunBridge instances with the same configured IP at the same time.** This includes running the Proxmox LXC and ESP32 simultaneously if they are configured to reuse the same address.
 
 ## Architecture
 
@@ -91,7 +93,7 @@ Configure the service environment for the actual SDongle address. The reference 
 
 ## Option B — WT32-ETH01 v1.4
 
-See **[`esp32/README.md`](esp32/README.md)** for the fixed reference network settings, complete BOM, CH340G USB-to-TTL wiring, IO0 download-mode procedure, validated PowerShell/esptool flashing commands, PlatformIO build, browser-flash merged image, OTA updates and rollback procedure.
+See **[`esp32/README.md`](esp32/README.md)** for the **complete ESP32 walkthrough**, including configuration through `secrets.h`, Ethernet-first/Wi-Fi-fallback behavior, BOM, CH340G USB-to-TTL wiring, IO0 download-mode procedure, PowerShell/esptool flashing, PlatformIO build, merged first-flash image, serial diagnostics, OTA updates, validation and rollback.
 
 Preferred Windows PowerShell build from the repository root:
 
@@ -111,14 +113,14 @@ Port: 5502
 Slave / Unit ID: 1
 ```
 
-In the reference A/B test both LXC and ESP32 use `192.168.10.27:5502`, but only one may be powered/running at a time.
+The host, listener port and Unit ID are configurable for the ESP32 in `esp32/include/secrets.h`. In the validated reference setup the LXC and ESP32 intentionally reused the same endpoint for A/B testing, with only one instance running at a time.
 
 ## Safety and limitations
 
 - Keep the proxy and SDongle Modbus ports on a trusted LAN; Modbus TCP has no authentication layer.
 - Do not expose the proxy, SDongle, or non-TLS local OCPP listener to the public Internet.
 - FC6 write requests can change inverter settings; use write support carefully.
-- The Debian implementation is the long-running reference. The WT32-ETH01 implementation is being field-validated on the same installation; short tests have completed full `14/14` register-batch polls when it is the only device using the SunBridge IP.
+- The Debian implementation is the long-running reference. The WT32-ETH01 implementation has been validated over both Ethernet and Wi-Fi fallback with repeated full `14/14` register-batch polls.
 - Firmware updates can change Huawei timing/register behavior.
 - This project is not affiliated with or endorsed by Huawei.
 
