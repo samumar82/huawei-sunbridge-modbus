@@ -1,171 +1,118 @@
 # ESP32 deployment — WT32-ETH01 v1.4
 
-This is the embedded alternative to the Debian/Proxmox deployment. It implements the same Huawei SunBridge cache/proxy behavior directly on a WT32-ETH01 v1.4 (ESP32 + LAN8720 Ethernet).
+Huawei SunBridge can run directly on a WT32-ETH01 v1.4 (ESP32 + LAN8720) as an embedded alternative to the Debian/Proxmox deployment.
 
-## Fixed network settings for the reference installation
+## Network behaviour
 
-| Item | Value |
-|---|---|
-| WT32-ETH01 | `192.168.10.27/24` |
-| Gateway / DNS | `192.168.10.1` |
-| SunBridge listener | TCP `5502` |
-| Web dashboard | HTTP `80` |
-| OTA update page | `http://192.168.10.27/update` |
-| Huawei SDongle | `192.168.10.2:502` |
-| Modbus Unit ID | `1` |
+Ethernet is the preferred interface. At boot SunBridge first attempts Ethernet. If Ethernet is unavailable, it stores a fallback flag and automatically reboots into Wi-Fi mode without initializing Ethernet.
 
-**Important:** the reference Proxmox LXC also uses `192.168.10.27`. Never run the LXC and ESP32 simultaneously. Stop one before starting the other. This deliberate IP reuse lets Home Assistant switch implementations without changing its Huawei Solar configuration.
+Ethernet and Wi-Fi use the same configured static IP. After a successful Wi-Fi fallback connection the flag is cleared; the device stays on Wi-Fi until its next restart, when Ethernet is tried again. This avoids running both interfaces with the same IP at the same time.
+
+## Configuration
+
+Installation-specific settings live in `include/secrets.h`. This file is ignored by Git and must not be committed.
+
+Create it from the public template:
+
+```powershell
+Copy-Item .\include\secrets.example.h .\include\secrets.h
+```
+
+Then edit `include/secrets.h`. It contains Wi-Fi SSID/password, SunBridge static IP, gateway, subnet, DNS, Huawei SDongle IP/port, SunBridge listener port, and Modbus Unit ID. Values in `secrets.example.h` are examples only.
+
+## Important IP rule
+
+Never run two devices with the configured SunBridge IP simultaneously. If a Debian/Proxmox SunBridge instance and the ESP32 use the same address, stop one before starting the other.
 
 ## Features
 
-- Ethernet-only proxy on WT32-ETH01 v1.4 / LAN8720.
-- Same 14 tested Huawei register batches as the Debian implementation.
-- 2 s post-connect settling delay and 500 ms inter-batch pacing.
-- Complete MBAP + PDU reads (no assumption that one TCP read contains a full frame).
-- Serialized single upstream access to the SDongle.
+- WT32-ETH01 v1.4 / ESP32 / LAN8720.
+- Ethernet preferred with automatic Wi-Fi fallback at boot.
+- Same configurable static IP on Ethernet and Wi-Fi.
+- 14 tested Huawei register batches.
+- 3 s polling interval, 2 s post-connect settling delay, 500 ms inter-batch pacing.
+- Complete MBAP + PDU reads and serialized upstream access to the SDongle.
 - FC3 cache reads and discovery passthrough; FC6 write-through.
-- Web dashboard at `http://192.168.10.27/`.
-- Active Modbus clients: IP, source port, connection date/time, duration, last request and request count.
-- Last 10 disconnected clients.
-- NTP time in `Europe/Rome`; proxy operation does not depend on NTP.
-- `/health` JSON endpoint.
-- Firmware OTA update page over wired Ethernet at `/update`.
+- Web dashboard with active interface, network state, polling/cache state, active clients and recent disconnections.
+- `/health` JSON endpoint with Ethernet/Wi-Fi state.
+- OTA firmware update page at `/update`.
+- NTP time using `Europe/Rome`; proxy operation does not depend on NTP.
 
-## Build on Windows PowerShell
+## Validation
 
-Only PlatformIO CLI is required. From the repository root, the preferred single command is:
-
-```powershell
-py -m pip install -U platformio; cd esp32; py -m platformio run
-```
-
-After a successful build the normal application image is under `.pio\build\wt32-eth01\firmware.bin` and the post-build script creates the merged browser-flash image:
-
-```text
-dist\huawei-sunbridge-wt32-eth01-webflash.bin
-```
-
-The merged image contains bootloader, partition table, boot_app0 and application at their correct offsets, so it can be flashed as one image starting at address `0x0` by a compatible ESP Web Tools flasher such as web.esphome.io.
-
-## Bill of materials and first flash wiring
-
-For the tested WT32-ETH01 setup:
-
-| Item | Purpose |
-|---|---|
-| **WT32-ETH01 v1.4** | ESP32 + LAN8720 Ethernet board running SunBridge |
-| **USB-to-TTL adapter with CH340G** | First serial flash and serial diagnostics |
-| **Ethernet cable** | Wired LAN connection |
-| **Female-female Dupont wires** | Power, UART and GPIO0 connections |
-| **5 V USB power source/cable** | Power for the WT32-ETH01 when not powered by the TTL adapter |
-
-The CH340G adapter used during validation was measured at approximately 3.3 V on TXD/RXD logic and 5 V on its 5 V supply pin.
-
-### CH340G -> WT32-ETH01 wiring
-
-Use the **UART0 RX0/TX0 pins near the antenna** on the WT32-ETH01 v1.4:
-
-```text
-CH340G GND  -> WT32 GND
-CH340G TXD  -> WT32 RX0 / RXD0 (GPIO3)
-CH340G RXD  -> WT32 TX0 / TXD0 (GPIO1)
-CH340G 5V   -> WT32 5V
-WT32 IO0    -> GND only while entering flash/download mode
-```
-
-**Do not connect the CH340G 3.3 V power pin to the WT32-ETH01.** The board is powered from 5 V; UART TX/RX must use 3.3 V logic. Do not move power/signal wires while the board is powered.
-
-For normal boot after flashing, disconnect **IO0 from GND** and reset/power-cycle the board.
-
-## First flash from Windows PowerShell
-
-The exact method validated on the reference board uses PlatformIO for the build and its bundled esptool for flashing.
-
-Build from the `esp32` directory:
-
-```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run
-```
-
-Put the board in download mode with **IO0 -> GND**, power/reset it, and optionally verify communication:
-
-```powershell
-py "$env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py" --chip esp32 --port COM17 chip_id
-```
-
-Then flash the merged image at offset `0x0`:
-
-```powershell
-py "$env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py" --chip esp32 --port COM17 --baud 460800 write_flash 0x0 ".\dist\huawei-sunbridge-wt32-eth01-webflash.bin"
-```
-
-Replace `COM17` with the port assigned to your USB-to-TTL adapter. When flashing completes, disconnect **IO0 from GND** and reset/power-cycle.
-
-Serial monitor:
-
-```powershell
-py -m serial.tools.miniterm COM17 115200
-```
-
-Exit miniterm with `Ctrl+]`.
-
-A healthy poll reports:
+The firmware was tested with both Ethernet and Wi-Fi fallback against a Huawei SDongle. Both paths repeatedly completed all configured batches:
 
 ```text
 Poll: 14/14 batches OK
 ```
 
-**Critical:** if the Proxmox/LXC version also uses `192.168.10.27`, it must be stopped before connecting the ESP32 to the LAN. Running both at once creates a duplicate-IP conflict and invalidates network/Modbus tests.
+One local 20-request connectivity sample produced:
 
-## Flash from web.esphome.io
+| Interface | Ping success | Average ping | TCP listener | Average TCP connect |
+|---|---:|---:|---:|---:|
+| Ethernet | 20/20 | 9 ms | 20/20 | 5.97 ms |
+| Wi-Fi | 20/20 | 72 ms | 20/20 | 15.91 ms |
 
-1. Stop LXC 126 first, because it owns `192.168.10.27` in the reference setup.
-2. Connect the WT32-ETH01 to the Windows PC through a USB-to-TTL adapter using **3.3 V logic**.
-3. Put the ESP32 into download mode (GPIO0 low while resetting/powering the board, according to your adapter/wiring).
-4. Open web.esphome.io in a Chromium-based browser, connect the serial port and install the merged file `dist\huawei-sunbridge-wt32-eth01-webflash.bin` at offset `0x0` when prompted for a custom binary.
-5. Remove GPIO0 from ground and reset/power-cycle.
-6. Connect Ethernet. The board should answer at `192.168.10.27`, dashboard port 80, Modbus TCP port 5502.
+The first Ethernet ping was a 138 ms startup outlier; the remaining 19 were approximately 1–4 ms. These figures describe one local test environment and are not universal performance guarantees.
 
-## OTA updates after the first flash
+## Build on Windows PowerShell
 
-After the first serial flash, the USB-to-TTL adapter is no longer required for normal firmware updates.
+From the repository root:
 
-1. Build the new firmware with PlatformIO.
-2. Open `http://192.168.10.27/update` from a device on the same LAN.
-3. Select the normal application file:
+```powershell
+cd esp32
+Copy-Item .\include\secrets.example.h .\include\secrets.h
+notepad .\include\secrets.h
+py -m platformio run
+```
+
+A successful build creates the OTA application image at `.pio\build\wt32-eth01\firmware.bin` and the merged first-flash image at `dist\huawei-sunbridge-wt32-eth01-webflash.bin`.
+
+## First flash
+
+Use a USB-to-TTL adapter with 3.3 V UART logic. Power the WT32-ETH01 through its appropriate 5 V input; do not power its 3.3 V rail from the adapter. Connect TXD to RX0/GPIO3, RXD to TX0/GPIO1, GND to GND, and hold IO0 to GND only while entering download mode.
+
+Example:
+
+```powershell
+py "$env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py" --chip esp32 --port COM17 --baud 460800 write_flash 0x0 ".\dist\huawei-sunbridge-wt32-eth01-webflash.bin"
+```
+
+Replace `COM17` with your serial port. Disconnect IO0 from GND and power-cycle after flashing.
+
+## OTA updates
+
+Open `http://SUNBRIDGE_IP/update` and upload the normal `.pio\build\wt32-eth01\firmware.bin`. Do not use the merged web-flash image for OTA.
+
+The web interface is intended for a trusted LAN and has no TLS. Do not expose it directly to the Internet.
+
+## Serial diagnostics
+
+```powershell
+py -m platformio device monitor -b 115200 -p COM17
+```
+
+Typical Ethernet startup:
 
 ```text
-.pio\build\wt32-eth01\firmware.bin
+Ethernet priority boot
+Ethernet UP: <configured IP>
+SunBridge <IP>:<port> -> SDongle <IP>:<port>
 ```
 
-4. Start the update and wait for the ESP32 to reboot.
+Typical fallback:
 
-For OTA, use `firmware.bin`, **not** the merged `dist\huawei-sunbridge-wt32-eth01-webflash.bin`. The merged image is only for the first/full serial flash at offset `0x0`.
-
-The OTA endpoint is intentionally LAN-only and has no TLS. Do not expose port 80 of the ESP32 to the Internet.
-
-## Direct PlatformIO serial upload alternative
-
-If you prefer to compile and flash the first image from PowerShell, replace `COM5` with the actual serial port:
-
-```powershell
-cd esp32; py -m platformio run -t upload --upload-port COM5
+```text
+Ethernet priority boot
+Ethernet unavailable - next boot will use WiFi
+[automatic reboot]
+WiFi fallback boot - Ethernet not initialized
+WiFi fallback UP: <configured IP>
+SunBridge <IP>:<port> -> SDongle <IP>:<port>
 ```
 
-For serial diagnostics:
+The SDongle may need a short settling period before accepting a new Modbus polling session; during validation an initial unsuccessful poll was followed automatically by repeated `14/14` cycles.
 
-```powershell
-cd esp32; py -m platformio device monitor -b 115200 -p COM5
-```
+## Rollback to Debian/Proxmox
 
-## PlatformIO download recovery
-
-If PlatformIO stops with an `HTTPClientError` while downloading `framework-arduinoespressif32`, remove only the partial framework/cache and retry from the `esp32` directory:
-
-```powershell
-Remove-Item "$env:USERPROFILE\.platformio\packages\framework-arduinoespressif32" -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item "$env:USERPROFILE\.platformio\.cache" -Recurse -Force -ErrorAction SilentlyContinue; py -m platformio run
-```
-
-## Test / rollback
-
-Keep the existing Debian LXC untouched during validation. Stop LXC 126, boot the ESP32 and verify Home Assistant plus the web dashboard. To roll back, power off/disconnect the ESP32 and start LXC 126 again. Because both implementations use `192.168.10.27:5502`, Home Assistant needs no endpoint change.
+Power off the ESP32 before starting another SunBridge instance configured with the same IP. If both implementations use the same address and listener port, Home Assistant does not require an endpoint change.
